@@ -1,0 +1,51 @@
+# Temporary, fork only: build a darwin-arm64 package with the SVG loader fix.
+# Uses a locally built docker image and the upstream prebuilt components.
+name: test-darwin-arm64-svg-icons
+
+on:
+  push:
+    branches: [ test-darwin-arm64-svg-icons ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - name: Build docker image
+        run: |
+          cd docker/cross-darwin-arm64
+          docker build -t yosyshq/cross-darwin-arm64:4.0 -f Dockerfile .
+      - name: Check the image has the SVG loader
+        run: docker run --rm yosyshq/cross-darwin-arm64:4.0 ls -l /opt/local/lib/librsvg-2.2.dylib /opt/local/lib/gdk-pixbuf-2.0/2.10.0/loaders/libpixbufloader-svg.so
+      - name: Download upstream components
+        run: |
+          for t in aiger apicula avy bitwuzla boolector cocotb cvc4 cvc5 eqy formal ghdl-yosys-plugin ghdl graphviz gtkwave icestorm imctk iverilog nextpnr-ecp5 nextpnr-generic nextpnr-himbaechel nextpnr-ice40 nextpnr-machxo2 nextpnr-nexus openfpgaloader pono prjoxide prjpeppercorn prjtrellis pyhdl python3 ric3 utils verilator xdot yices yosys-slang-plugin yosys z3; do
+            wget -qO- "https://github.com/YosysHQ/oss-cad-suite-build/releases/download/bucket-darwin-arm64/darwin-arm64-$t.tgz" --retry-connrefused --read-timeout=20 --timeout=15 --retry-on-http-error=404 | tar xfz -
+          done
+          df -h /
+      - name: Build system-resources
+        run: ./builder.py build --arch=darwin-arm64 --target=system-resources --rules=default --single
+      - name: Check the SVG loader in system-resources
+        run: |
+          ls -l _outputs/darwin-arm64/system-resources/*/lib/librsvg-2.2.dylib _outputs/darwin-arm64/system-resources/*/lib/gdk-pixbuf-2.0/loaders/libpixbufloader-svg.so || find _outputs/darwin-arm64/system-resources -name '*rsvg*' -o -name '*svg.so'
+      - name: Build package
+        run: ./builder.py build --arch=darwin-arm64 --target=default --rules=default --single
+      - uses: ncipollo/release-action@v1
+        with:
+          allowUpdates: True
+          prerelease: True
+          omitBody: True
+          omitBodyDuringUpdate: True
+          omitNameDuringUpdate: True
+          tag: test-darwin-arm64-svg-icons
+          commit: test-darwin-arm64-svg-icons
+          artifacts: "_outputs/darwin-arm64/default/*.tgz"
+          token: ${{ secrets.GITHUB_TOKEN }}
